@@ -24,23 +24,55 @@ jobs:
           submodules: recursive
 
       - name: Build T3-S3
-        id: build
         uses: meshtastic/gh-action-firmware@main
         with:
           pio_platform: esp32s3
           pio_env: tlora-t3s3-v1
           pio_target: build
 
-      - name: Download unified ESP32 OTA firmware
+      - name: Download unified ESP32-S3 OTA
+        working-directory: release
         run: |
           curl -fL \
-            https://github.com/meshtastic/firmware/releases/latest/download/mt-esp32s3-ota.bin \
-            -o release/mt-esp32s3-ota.bin
+            https://github.com/meshtastic/esp32-unified-ota/releases/latest/download/mt-esp32s3-ota.bin \
+            -o mt-esp32s3-ota.bin
 
-      - name: Upload complete firmware package
+      - name: Update firmware manifest
+        working-directory: release
+        run: |
+          OTA_FILE="mt-esp32s3-ota.bin"
+          OTA_MD5=$(md5sum "$OTA_FILE" | cut -d' ' -f1)
+          OTA_SIZE=$(stat -c%s "$OTA_FILE")
+
+          for manifest in firmware-*.mt.json; do
+            jq --arg name "$OTA_FILE" \
+               --arg md5 "$OTA_MD5" \
+               --argjson bytes "$OTA_SIZE" \
+               --arg part "app1" \
+               'if .files | map(select(.name == $name)) | length == 0
+                then .files += [{
+                  "name": $name,
+                  "md5": $md5,
+                  "bytes": $bytes,
+                  "part_name": $part
+                }]
+                else . end' \
+               "$manifest" > "$manifest.tmp"
+
+            mv "$manifest.tmp" "$manifest"
+          done
+
+      - name: Show generated files
+        run: ls -lh release/
+
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
           name: custom-meshtastic-firmware
-          path: release/
+          path: |
+            release/*.bin
+            release/*.mt.json
+            release/*.sh
+            release/*.bat
           if-no-files-found: error
           retention-days: 7
